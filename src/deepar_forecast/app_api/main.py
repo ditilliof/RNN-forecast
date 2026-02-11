@@ -1,5 +1,5 @@
 """
-FastAPI application for DeepAR forecasting.
+FastAPI application for RNN time-series forecasting.
 
 Provides REST API for data ingestion, training, forecasting, and backtesting.
 """
@@ -21,7 +21,7 @@ from deepar_forecast.backtest import BacktestConfig, BacktestEngine, prepare_for
 from deepar_forecast.data import DataStorage, get_provider
 from deepar_forecast.evaluation import compute_all_metrics
 from deepar_forecast.features import create_sequences, engineer_features, split_by_time
-from deepar_forecast.models import DeepARStudentT, DeepARTrainer
+from deepar_forecast.models import RNNRegressor, RNNTrainer
 
 from .schemas import (
     BacktestRequest,
@@ -38,9 +38,9 @@ from .schemas import (
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="DeepAR Trade Forecast API",
-    description="Production-grade API for crypto/ETF forecasting with DeepAR and Student's t likelihood",
-    version="0.1.0",
+    title="RNN Trade Forecast API",
+    description="Production-grade API for crypto/ETF forecasting with deterministic RNN regressor",
+    version="0.2.0",
 )
 
 # CORS middleware
@@ -53,7 +53,7 @@ app.add_middleware(
 )
 
 # Configuration
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///data/deepar.db")
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///data/forecast.db")
 MODEL_DIR = os.getenv("MODEL_DIR", "./models")
 DEVICE = os.getenv("DEFAULT_DEVICE", "cuda" if torch.cuda.is_available() else "cpu")
 
@@ -70,8 +70,8 @@ logger.info(f"API initialized with device: {DEVICE}")
 async def root():
     """Root endpoint."""
     return {
-        "message": "DeepAR Trade Forecast API",
-        "version": "0.1.0",
+        "message": "RNN Trade Forecast API",
+        "version": "0.2.0",
         "docs": "/docs",
     }
 
@@ -176,7 +176,7 @@ async def ingest_data(request: IngestRequest):
 @app.post("/train", response_model=TrainResponse, tags=["Training"])
 async def train_model(request: TrainRequest):
     """
-    Train DeepAR model on specified symbols.
+    Train RNN regressor model on specified symbols.
 
     Downloads data from storage, engineers features, trains model, and saves checkpoint.
     """
@@ -328,7 +328,7 @@ async def train_model(request: TrainRequest):
         # Initialize model
         # Use direct fields first, fall back to hyperparams dict for backward compatibility
         hyperparams = request.hyperparams or {}
-        model = DeepARStudentT(
+        model = RNNRegressor(
             input_size=train_past_features.shape[-1],
             hidden_size=request.hidden_size or hyperparams.get("hidden_size", 64),
             num_layers=request.num_layers or hyperparams.get("num_layers", 2),
@@ -344,7 +344,7 @@ async def train_model(request: TrainRequest):
         }
 
         # Train
-        trainer = DeepARTrainer(model, device=DEVICE)
+        trainer = RNNTrainer(model, device=DEVICE)
 
         training_config = {
             "epochs": request.epochs or hyperparams.get("epochs", 50),
@@ -354,7 +354,24 @@ async def train_model(request: TrainRequest):
             "checkpoint_dir": MODEL_DIR,
         }
 
+        import time as _time
+        _t0 = _time.monotonic()
         history = trainer.train(train_data, val_data, training_config)
+        _training_seconds = _time.monotonic() - _t0
+
+        # ── Extract loss diagnostics from training history ──────────────
+        train_losses = history.get("train_loss", [])
+        val_losses = history.get("val_loss", [])
+        final_train_loss = float(train_losses[-1]) if train_losses else None
+        final_val_loss   = float(val_losses[-1])   if val_losses   else None
+        residual_std     = float(history.get("residual_std", 0.0))
+        epochs_completed = len(train_losses)
+
+        logger.info(
+            f"Training finished: epochs={epochs_completed}, "
+            f"final_train_loss={final_train_loss}, final_val_loss={final_val_loss}, "
+            f"residual_std={residual_std:.6f}, wall_time={_training_seconds:.1f}s"
+        )
 
         # Save model
         model_path = os.path.join(MODEL_DIR, f"{run_id}.pt")
@@ -383,6 +400,7 @@ async def train_model(request: TrainRequest):
             "feature_config": feature_config,
             "feature_cols": feature_cols if feature_cols else [],
             "uses_dummy_features": uses_dummy,
+            "residual_std": residual_std,
         }
 
         logger.info(
@@ -417,7 +435,18 @@ async def train_model(request: TrainRequest):
         return TrainResponse(
             status="success",
             run_id=run_id,
-            message=f"Model trained successfully",
+            message="Model trained successfully",
+            final_train_loss=final_train_loss,
+            final_val_loss=final_val_loss,
+            residual_std=round(residual_std, 6),
+            epochs=epochs_completed,
+            batch_size=int(training_config.get("batch_size", 32)),
+            learning_rate=float(training_config.get("learning_rate", 1e-3)),
+            hidden_size=int(actual_hidden),
+            num_layers=int(actual_layers),
+            dropout_rate=float(actual_dropout),
+            context_length=int(request.context_length),
+            training_time=round(_training_seconds, 2),
         )
 
     except Exception as e:
@@ -430,13 +459,14 @@ async def generate_forecast(
     symbol: str,
     timeframe: str,
     horizon: int,
-    n_samples: int = 100,
     run_id: Optional[str] = None,
 ):
     """
-    Generate probabilistic forecast for a symbol.
+    Generate deterministic forecast with residual-based prediction intervals.
 
-    Uses trained model to produce sample paths and quantiles.
+    Uses trained RNN regressor for point predictions. Prediction intervals
+    are derived from residual_std stored during training:
+        interval = point_forecast ± z * residual_std
     """
     try:
         logger.info(f"Generating forecast: {symbol} {timeframe} h={horizon}")
@@ -481,9 +511,6 @@ async def generate_forecast(
         logger.info(f"Forecast run_id={run_id}, checkpoint={model_path}")
 
         # ── Infer architecture from checkpoint when hyperparams are incomplete ──
-        # Old runs may only store {"context_length": N}.
-        # We recover hidden_size / num_layers / input_size from the state dict
-        # so the model is reconstructed with the EXACT same shape.
         if "hidden_size" not in hyperparams or "input_size" not in hyperparams:
             logger.warning(
                 f"Run {run_id} has incomplete hyperparams: {hyperparams}. "
@@ -491,19 +518,15 @@ async def generate_forecast(
             )
             state_dict = torch.load(model_path, map_location=DEVICE)
 
-            # LSTM weight_ih_l0 shape: [4*hidden_size, rnn_input_size]
-            # GRU  weight_ih_l0 shape: [3*hidden_size, rnn_input_size]
             ih_key = "rnn.weight_ih_l0"
             hh_key = "rnn.weight_hh_l0"
             if ih_key in state_dict and hh_key in state_dict:
-                ih_shape = state_dict[ih_key].shape  # [gate_mult*H, rnn_input]
-                hh_shape = state_dict[hh_key].shape  # [gate_mult*H, H]
+                ih_shape = state_dict[ih_key].shape
+                hh_shape = state_dict[hh_key].shape
                 inferred_hidden = int(hh_shape[1])
-                # Count layers: weight_ih_l{N} keys
                 n_layers = sum(1 for k in state_dict if k.startswith("rnn.weight_ih_l"))
-                # RNN input = target(1) + features(input_size) + 3*emb(8)
                 rnn_input_total = int(ih_shape[1])
-                emb_total = 3 * 8  # symbol(8) + timeframe(8) + asset_type(8)
+                emb_total = 3 * 8
                 inferred_input_size = max(rnn_input_total - 1 - emb_total, 1)
 
                 hyperparams.setdefault("hidden_size", inferred_hidden)
@@ -514,8 +537,7 @@ async def generate_forecast(
 
                 logger.info(
                     f"[{run_id}] Inferred from checkpoint: hidden_size={inferred_hidden}, "
-                    f"num_layers={n_layers}, input_size={inferred_input_size}, "
-                    f"rnn_input_total={rnn_input_total}"
+                    f"num_layers={n_layers}, input_size={inferred_input_size}"
                 )
             else:
                 logger.error("Cannot infer architecture — expected LSTM/GRU keys missing")
@@ -529,59 +551,39 @@ async def generate_forecast(
         run_feature_cols = hyperparams.get("feature_cols", None)
         run_uses_dummy = hyperparams.get("uses_dummy_features", None)
         run_schema = hyperparams.get("run_schema_version", 1)
+        residual_std = float(hyperparams.get("residual_std", 0.01))
 
-        # ── Coerce stored_input_size early (before ANY array creation) ──
+        # ── Coerce stored_input_size early ──
         raw_stored_input = hyperparams.get("input_size", None)
         stored_input_size = max(int(raw_stored_input), 1) if raw_stored_input is not None else 1
         logger.info(
-            f"[{run_id}] DIAG raw hyperparams: run_schema={run_schema}, "
-            f"raw_stored_input={raw_stored_input!r} (type={type(raw_stored_input).__name__}), "
-            f"coerced stored_input_size={stored_input_size}, "
-            f"feature_config type={type(run_feature_config).__name__}, "
-            f"feature_cols type={type(run_feature_cols).__name__} val={run_feature_cols!r}, "
-            f"uses_dummy={run_uses_dummy!r}"
+            f"[{run_id}] DIAG run_schema={run_schema}, "
+            f"stored_input_size={stored_input_size}, residual_std={residual_std}"
         )
 
-        # ── Backward compatibility: default missing metadata to safe values ──
-        # Trigger on: EITHER field is None, or feature_cols is empty list
+        # ── Backward compatibility ──
         if run_feature_config is None or run_feature_cols is None or (
             isinstance(run_feature_cols, list) and len(run_feature_cols) == 0
         ):
-            logger.warning(
-                f"[{run_id}] Old/empty run (schema v{run_schema}): "
-                f"feature_config={run_feature_config!r}, feature_cols={run_feature_cols!r}. "
-                "Defaulting to empty config, dummy features."
-            )
             run_feature_config = run_feature_config if isinstance(run_feature_config, dict) else {}
             run_feature_cols = []
             run_uses_dummy = True
 
-        # Ensure run_uses_dummy is a bool (old runs may lack it)
         if run_uses_dummy is None:
             run_uses_dummy = True
-            logger.warning(f"[{run_id}] uses_dummy_features was None, defaulting to True")
 
         # Load data
         df = storage.fetch_ohlcv(symbol=symbol, timeframe=timeframe)
         if df.empty:
             raise HTTPException(status_code=404, detail=f"No data for {symbol}")
 
-        # Engineer features using the SAME config that training used
         df = engineer_features(df, run_feature_config if run_feature_config else {})
 
-        # Load context_length from training run metadata
         context_length = hyperparams.get("context_length", 168)
-        logger.info(
-            f"[{run_id}] Forecast pipeline: symbol={symbol}, timeframe={timeframe}, "
-            f"feature_config keys={list((run_feature_config or {}).keys())}, "
-            f"feature_cols={run_feature_cols}, uses_dummy={run_uses_dummy}, "
-            f"context_length={context_length}, stored_input_size={stored_input_size}"
-        )
 
         if len(df) < context_length:
             logger.warning(
-                f"Insufficient data for full context. Have {len(df)} rows, need {context_length}. "
-                f"Using all available data."
+                f"Insufficient data for full context. Have {len(df)} rows, need {context_length}."
             )
             context_length = len(df)
             if context_length < 10:
@@ -592,169 +594,109 @@ async def generate_forecast(
 
         context_df = df.iloc[-context_length:].copy()
 
-        # Prepare context data — use run_feature_cols from training metadata
+        # Prepare context tensors
         target_vals = context_df["log_return"].values.astype(np.float32)
-        logger.info(
-            f"[{run_id}] DIAG target_vals: size={target_vals.size}, shape={target_vals.shape}"
-        )
         past_target = target_vals.reshape(1, -1, 1)
 
         # ── Determine if we should use real features or dummy ──
-        use_dummy = True  # default safe
-        input_size = max(stored_input_size, 1)  # always >= 1
+        use_dummy = True
+        input_size = max(stored_input_size, 1)
 
         if (
             isinstance(run_feature_cols, list)
             and len(run_feature_cols) > 0
             and not run_uses_dummy
         ):
-            # Verify all columns exist in the engineered df
             missing_cols = [c for c in run_feature_cols if c not in context_df.columns]
             if missing_cols:
-                logger.warning(
-                    f"[{run_id}] feature_cols from run metadata missing in current df: {missing_cols}. "
-                    "Falling back to dummy features."
-                )
+                logger.warning(f"[{run_id}] Missing feature cols: {missing_cols}. Using dummy.")
             else:
                 raw = context_df[run_feature_cols].values
-                logger.info(
-                    f"[{run_id}] DIAG raw features: raw.shape={raw.shape}, "
-                    f"raw.size={raw.size}, raw.dtype={raw.dtype}, "
-                    f"run_feature_cols[:10]={run_feature_cols[:10]}"
-                )
                 n_cols = raw.shape[-1] if raw.ndim >= 2 else 0
                 if raw.size > 0 and n_cols > 0:
                     past_features = raw.astype(np.float32).reshape(1, -1, n_cols)
                     input_size = n_cols
                     use_dummy = False
-                else:
-                    logger.warning(
-                        f"[{run_id}] feature_cols={run_feature_cols} yielded "
-                        f"raw.shape={raw.shape}, raw.size={raw.size}. "
-                        "Falling back to dummy features."
-                    )
 
         if use_dummy:
-            # ALWAYS create at least dim=1 dummy features
             dummy_dim = max(stored_input_size, 1)
             past_features = np.zeros((1, context_length, dummy_dim), dtype=np.float32)
             input_size = dummy_dim
-            logger.info(
-                f"[{run_id}] Using dummy zeros: past_features.shape={past_features.shape}, "
-                f"input_size={input_size}"
-            )
 
         # ── ASSERT: feature dimension must NEVER be 0 ──
         feat_last_dim = past_features.shape[-1] if past_features.ndim >= 1 else 0
         if feat_last_dim < 1:
-            diag = (
-                f"run_id={run_id}, symbol={symbol}, timeframe={timeframe}, "
-                f"feature_cols(type={type(run_feature_cols).__name__}, "
-                f"len={len(run_feature_cols) if run_feature_cols else 'N/A'}, "
-                f"first10={run_feature_cols[:10] if run_feature_cols else []}), "
-                f"stored_input_size={stored_input_size}, "
-                f"past_features.shape={past_features.shape}, "
-                f"past_features.size={past_features.size}"
-            )
-            logger.error(f"[{run_id}] FATAL 0-dim features: {diag}")
-            raise HTTPException(
-                status_code=400,
-                detail=f"Feature dimension is 0 after preparation. {diag}",
-            )
+            raise HTTPException(status_code=400, detail="Feature dimension is 0 after preparation.")
 
-        logger.info(
-            f"[{run_id}] Forecast tensors: past_target={past_target.shape}, "
-            f"past_features={past_features.shape}, input_size={input_size}"
-        )
-
-        # ── Build model with safe architecture params ──
+        # ── Build model ──
         model_input_size = max(stored_input_size, 1)
         model_hidden = hyperparams.get("hidden_size", 64)
         model_layers = hyperparams.get("num_layers", 2)
         model_dropout = hyperparams.get("dropout", 0.1)
         model_rnn = hyperparams.get("rnn_type", "lstm")
 
-        model = DeepARStudentT(
+        model = RNNRegressor(
             input_size=model_input_size,
             hidden_size=model_hidden,
             num_layers=model_layers,
             dropout=model_dropout,
             rnn_type=model_rnn,
         )
-        logger.info(
-            f"[{run_id}] Forecast model arch: input_size={model_input_size}, "
-            f"hidden_size={model_hidden}, num_layers={model_layers}, rnn_type={model_rnn}"
-        )
 
         try:
             model.load_state_dict(torch.load(model_path, map_location=DEVICE))
         except RuntimeError as arch_err:
-            logger.exception(f"Architecture mismatch loading checkpoint: {arch_err}")
+            logger.exception(f"Architecture mismatch: {arch_err}")
             raise HTTPException(
                 status_code=400,
                 detail=(
                     f"Model architecture mismatch for run {run_id}. "
-                    "Stored hyperparams do not match checkpoint weights. "
                     f"Please retrain the model. Details: {arch_err}"
                 ),
             )
 
-        # Reconcile past_features shape with model's expected input_size
+        # Reconcile feature dimensions
         if past_features.shape[-1] != model_input_size:
-            logger.warning(
-                f"[{run_id}] Adjusting past_features from dim={past_features.shape[-1]} "
-                f"to model input_size={model_input_size}"
-            )
             past_features = np.zeros(
                 (1, context_length, model_input_size), dtype=np.float32
             )
-            input_size = model_input_size
 
         model.to(DEVICE)
         model.eval()
 
-        # ── Final safety net: ensure no 0-dim arrays before torch conversion ──
-        if past_features.shape[-1] < 1 or past_target.shape[-1] < 1:
-            logger.error(
-                f"[{run_id}] FATAL pre-torch 0-dim: "
-                f"past_target.shape={past_target.shape}, past_features.shape={past_features.shape}"
-            )
-            past_features = np.zeros(
-                (1, past_target.shape[1], max(model_input_size, 1)), dtype=np.float32
-            )
+        # Convert to tensors
+        past_target_t = torch.from_numpy(
+            past_target.astype(np.float32)
+        ).to(device=DEVICE, dtype=torch.float32)
+        past_features_t = torch.from_numpy(
+            past_features.astype(np.float32)
+        ).to(device=DEVICE, dtype=torch.float32)
 
-        # Generate samples — ensure float32 dtype everywhere
-        past_target = past_target.astype(np.float32, copy=False)
-        past_features = past_features.astype(np.float32, copy=False)
-
-        past_target_t = torch.from_numpy(past_target).to(device=DEVICE, dtype=torch.float32)
-        past_features_t = torch.from_numpy(past_features).to(device=DEVICE, dtype=torch.float32)
-
-        # Pre-forward dtype/device validation
-        logger.info(
-            f"Forecast input dtypes: past_target={past_target_t.dtype} "
-            f"past_features={past_features_t.dtype} device={past_target_t.device}"
-        )
-        assert past_target_t.dtype == torch.float32, f"past_target dtype {past_target_t.dtype}"
-        assert past_features_t.dtype == torch.float32, f"past_features dtype {past_features_t.dtype}"
-
-        samples = model.sample(
+        # ── Deterministic forecast ──
+        forecast = model.predict(
             past_target=past_target_t,
             past_features=past_features_t,
             horizon=horizon,
-            n_samples=n_samples,
         )
 
-        # Compute quantiles
-        quantile_dict = model.compute_quantiles(samples, quantiles=[0.1, 0.25, 0.5, 0.75, 0.9])
+        median_np = forecast.cpu().numpy().squeeze()  # (horizon,)
 
-        # Convert to numpy
-        samples_np = samples.cpu().numpy().squeeze()  # (n_samples, horizon)
-        median_np = quantile_dict[0.5].cpu().numpy().squeeze()
+        # ── Residual-based prediction intervals ──
+        # z-scores: 80% → 1.28, 90% → 1.645, 95% → 1.96
+        quantile_dict = {}
+        for q, z in [(0.025, 1.96), (0.05, 1.645), (0.1, 1.28),
+                      (0.9, -1.28), (0.95, -1.645), (0.975, -1.96)]:
+            # For lower quantiles z is positive offset below, upper z is negative
+            if q < 0.5:
+                vals = median_np - abs(z) * residual_std
+            else:
+                vals = median_np + abs(z) * residual_std
+            quantile_dict[str(q)] = vals.tolist()
+
+        quantile_dict["0.5"] = median_np.tolist()
 
         # Generate future timestamps
         last_timestamp = df["timestamp"].iloc[-1]
-        import pandas as pd
         if "h" in timeframe:
             freq = f"{timeframe.replace('h', 'H')}"
         elif "d" in timeframe:
@@ -770,17 +712,14 @@ async def generate_forecast(
             horizon=horizon,
             timestamps=[ts.isoformat() for ts in future_timestamps],
             median=median_np.tolist(),
-            quantiles={
-                str(q): quantile_dict[q].cpu().numpy().squeeze().tolist()
-                for q in quantile_dict
-            },
-            samples=samples_np.tolist() if n_samples <= 10 else None,  # Limit payload size
+            quantiles=quantile_dict,
+            residual_std=round(residual_std, 6),
         )
 
         return response
 
     except HTTPException:
-        raise  # Let FastAPI handle HTTP errors directly
+        raise
     except Exception as e:
         logger.exception(f"Error in forecast endpoint: {e}")
         raise HTTPException(status_code=500, detail=f"Forecast generation failed: {e}")

@@ -38,20 +38,16 @@ class BaseModel(ABC):
         self,
         context: Dict[str, np.ndarray],
         horizon: int,
-        n_samples: int = 100,
-    ) -> Tuple[np.ndarray, Dict[float, np.ndarray]]:
+    ) -> np.ndarray:
         """
-        Generate probabilistic forecasts.
+        Generate deterministic forecasts.
 
         Args:
             context: Context data dict with past_target, past_features, etc.
             horizon: Number of steps to forecast
-            n_samples: Number of sample paths to generate
 
         Returns:
-            Tuple of (samples, quantiles):
-            - samples: (batch, n_samples, horizon)
-            - quantiles: Dict mapping quantile_level -> (batch, horizon)
+            predictions: (batch, horizon) point forecasts
         """
         pass
 

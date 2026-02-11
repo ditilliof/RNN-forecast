@@ -1,4 +1,4 @@
-"""Training utilities for DeepAR model with Student's t likelihood."""
+"""Training utilities for RNN regressor with Huber regression loss."""
 
 import json
 import os
@@ -8,23 +8,25 @@ from typing import Any, Dict, Optional
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from loguru import logger
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 
-from .deepar import DeepARStudentT, student_t_log_likelihood
+from .rnn_regressor import RNNRegressor
 
 
-class DeepARTrainer:
+class RNNTrainer:
     """
-    Trainer for DeepAR model with Student's t likelihood.
+    Trainer for RNNRegressor with Huber regression loss.
 
-    Handles training loop, validation, checkpointing, and logging.
+    Handles training loop, validation, checkpointing, logging,
+    and residual-based prediction-interval statistics.
     """
 
     def __init__(
         self,
-        model: DeepARStudentT,
+        model: RNNRegressor,
         device: str = "cuda" if torch.cuda.is_available() else "cpu",
         seed: int = 42,
     ):
@@ -32,7 +34,7 @@ class DeepARTrainer:
         Initialize trainer.
 
         Args:
-            model: DeepAR model instance
+            model: RNNRegressor instance
             device: 'cuda' or 'cpu'
             seed: Random seed for reproducibility
         """
@@ -47,7 +49,7 @@ class DeepARTrainer:
             torch.cuda.manual_seed_all(seed)
 
         logger.info(
-            f"Initialized DeepARTrainer on device: {device}, "
+            f"Initialized RNNTrainer on device: {device}, "
             f"module_file={__file__}, torch={torch.__version__}"
         )
 
@@ -60,7 +62,7 @@ class DeepARTrainer:
         """
         Train the model.
 
-        [REF_DEEPAR_PAPER] Algorithm 1 - Training procedure with teacher forcing
+        [REF] Training procedure with teacher forcing
 
         Args:
             train_data: Dict with 'past_target', 'past_features', 'future_target'
@@ -119,6 +121,7 @@ class DeepARTrainer:
 
         best_val_loss = float("inf")
         patience_counter = 0
+        residual_std: float = 0.0  # populated from val set after training
 
         logger.info(f"Starting training for {epochs} epochs")
 
@@ -167,10 +170,20 @@ class DeepARTrainer:
 
         logger.info("Training complete")
 
+        # ── Compute residual_std on validation set for prediction intervals ──
+        if val_loader is not None:
+            residual_std = self._compute_residual_std(val_loader)
+        else:
+            # Fallback: use training set
+            residual_std = self._compute_residual_std(train_loader)
+
+        history["residual_std"] = residual_std
+        logger.info(f"Residual std for prediction intervals: {residual_std:.6f}")
+
         return history
 
     def _train_epoch(self, train_loader: DataLoader, optimizer: torch.optim.Optimizer) -> float:
-        """Run one training epoch."""
+        """Run one training epoch with Huber regression loss."""
         self.model.train()
         total_loss = 0.0
         n_batches = 0
@@ -188,21 +201,22 @@ class DeepARTrainer:
                 future_target = future_target.unsqueeze(-1)
 
             # Forward pass with teacher forcing
-            mu, sigma, nu = self.model(
+            predictions = self.model(
                 past_target=past_target,
                 past_features=past_features,
                 future_target=future_target,
             )
 
-            # Compute negative log-likelihood loss
-            # Target: concatenate past and future
-            full_target = torch.cat([past_target, future_target], dim=1)
+            # Loss only on future horizon predictions
+            context_len = past_target.size(1)
+            future_preds = predictions[:, context_len:, :]  # (B, horizon, 1)
 
-            # Log-likelihood for each timestep
-            log_likelihood = student_t_log_likelihood(full_target, mu, sigma, nu)
+            loss = F.huber_loss(future_preds, future_target, delta=1.0)
 
-            # Negative log-likelihood (we want to minimize)
-            loss = -log_likelihood.mean()
+            # Skip NaN/Inf batches
+            if not torch.isfinite(loss):
+                logger.warning("Non-finite loss encountered, skipping batch")
+                continue
 
             # Backward pass
             optimizer.zero_grad()
@@ -216,10 +230,10 @@ class DeepARTrainer:
             total_loss += loss.item()
             n_batches += 1
 
-        return total_loss / n_batches
+        return total_loss / max(n_batches, 1)
 
     def _validate_epoch(self, val_loader: DataLoader) -> float:
-        """Run validation epoch."""
+        """Run validation epoch with Huber regression loss."""
         self.model.eval()
         total_loss = 0.0
         n_batches = 0
@@ -237,21 +251,63 @@ class DeepARTrainer:
                     future_target = future_target.unsqueeze(-1)
 
                 # Forward pass
-                mu, sigma, nu = self.model(
+                predictions = self.model(
                     past_target=past_target,
                     past_features=past_features,
                     future_target=future_target,
                 )
 
-                # Compute loss
-                full_target = torch.cat([past_target, future_target], dim=1)
-                log_likelihood = student_t_log_likelihood(full_target, mu, sigma, nu)
-                loss = -log_likelihood.mean()
+                # Loss only on future horizon
+                context_len = past_target.size(1)
+                future_preds = predictions[:, context_len:, :]
+
+                loss = F.huber_loss(future_preds, future_target, delta=1.0)
 
                 total_loss += loss.item()
                 n_batches += 1
 
-        return total_loss / n_batches
+        return total_loss / max(n_batches, 1)
+
+    def _compute_residual_std(self, loader: DataLoader) -> float:
+        """
+        Compute standard deviation of residuals (pred − actual) on a dataset.
+
+        Used to build approximate prediction intervals at inference time:
+            interval = point_forecast ± z * residual_std
+        """
+        self.model.eval()
+        all_residuals = []
+
+        with torch.no_grad():
+            for batch in loader:
+                past_target, past_features, future_target = batch
+                past_target = past_target.to(self.device)
+                past_features = past_features.to(self.device)
+                future_target = future_target.to(self.device)
+
+                if past_target.dim() == 2:
+                    past_target = past_target.unsqueeze(-1)
+                if future_target.dim() == 2:
+                    future_target = future_target.unsqueeze(-1)
+
+                predictions = self.model(
+                    past_target=past_target,
+                    past_features=past_features,
+                    future_target=future_target,
+                )
+
+                context_len = past_target.size(1)
+                future_preds = predictions[:, context_len:, :]
+                residuals = (future_preds - future_target).cpu().numpy().flatten()
+                all_residuals.append(residuals)
+
+        all_residuals = np.concatenate(all_residuals)
+        std = float(np.std(all_residuals))
+        logger.info(
+            f"Residual stats: mean={np.mean(all_residuals):.6f}, "
+            f"std={std:.6f}, n={len(all_residuals)}"
+        )
+        return std
 
     def _create_dataloader(
         self,

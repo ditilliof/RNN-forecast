@@ -79,7 +79,7 @@ class CCXTProvider(IDataProvider):
         """
         Fetch crypto OHLCV data.
 
-        [REF_DEEPAR_PAPER] Raw price data is converted to log-returns in feature pipeline.
+        [REF] Raw price data is converted to log-returns in the feature pipeline.
         """
         if not self.validate_symbol(symbol):
             raise ValueError(f"Symbol '{symbol}' not available on {self.exchange_id}")

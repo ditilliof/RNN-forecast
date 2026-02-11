@@ -89,7 +89,7 @@ class DataStorage:
     Supports SQLite (default) and PostgreSQL via DATABASE_URL.
     """
 
-    def __init__(self, database_url: str = "sqlite:///data/deepar.db"):
+    def __init__(self, database_url: str = "sqlite:///data/forecast.db"):
         """
         Initialize storage with database connection.
 

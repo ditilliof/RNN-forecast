@@ -1,5 +1,5 @@
 """
-Single-Page Streamlit App for DeepAR Forecasting
+Single-Page Streamlit App for RNN Forecasting
 A guided wizard-like workflow for crypto and ETF forecasting.
 """
 
@@ -229,7 +229,7 @@ def fetch_and_train(asset_type: str, symbol: str, timeframe: str,
         results["training_info"] = train_result
         
         # Step 3: Generate forecast
-        st.info("🔮 Generating probabilistic forecast...")
+        st.info("🔮 Generating forecast...")
         
         # Forecast endpoint uses GET with query params
         response = requests.get(
@@ -238,7 +238,6 @@ def fetch_and_train(asset_type: str, symbol: str, timeframe: str,
                 "symbol": symbol,
                 "timeframe": timeframe,
                 "horizon": horizon,
-                "n_samples": 100,
             },
             timeout=120
         )
@@ -258,11 +257,10 @@ def fetch_and_train(asset_type: str, symbol: str, timeframe: str,
         transformed_forecast = {
             "forecast_dates": forecast_result.get("timestamps", []),
             "median": forecast_result.get("median", []),
-            "lower_80": quantiles.get("0.1", quantiles.get("0.25", [])),  # 10th or 25th percentile
-            "upper_80": quantiles.get("0.9", quantiles.get("0.75", [])),  # 90th or 75th percentile
-            "lower_95": quantiles.get("0.1", []),  # Best approximation with available data
-            "upper_95": quantiles.get("0.9", []),  # Best approximation with available data
-            "samples": forecast_result.get("samples", []),
+            "lower_80": quantiles.get("0.1", []),   # 80% interval
+            "upper_80": quantiles.get("0.9", []),   # 80% interval
+            "lower_95": quantiles.get("0.025", quantiles.get("0.05", [])),  # 95% interval
+            "upper_95": quantiles.get("0.975", quantiles.get("0.95", [])),  # 95% interval
         }
         results["forecast"] = transformed_forecast
         
@@ -353,18 +351,6 @@ def calculate_forecast_summary(forecast_data: Dict) -> Dict:
         summary['direction'] = 'UP' if total_return > 0 else 'DOWN'
         summary['direction_prob'] = None
 
-        # Try to compute direction probability from samples
-        raw_samples = forecast_data.get('samples')
-        if raw_samples is not None and raw_samples != []:
-            try:
-                samples = np.asarray(raw_samples, dtype=np.float64)
-                if samples.ndim == 2 and samples.shape[0] > 0 and samples.shape[1] == len(median):
-                    total_returns = samples.sum(axis=1)
-                    prob_up = float((total_returns > 0).mean())
-                    summary['direction_prob'] = prob_up if total_return > 0 else (1 - prob_up)
-            except (ValueError, TypeError):
-                pass  # samples unconvertible — skip
-
     # --- Volatility ---
     summary['volatility'] = float(median.std())
 
@@ -395,7 +381,7 @@ def main():
     
     # Page config
     st.set_page_config(
-        page_title="DeepAR Forecasting",
+        page_title="RNN Forecasting",
         page_icon="🔮",
         layout="wide",
     )
@@ -435,9 +421,9 @@ def main():
     """, unsafe_allow_html=True)
     
     # Title and description
-    st.title("🔮 DeepAR Price Forecasting")
+    st.title("🔮 RNN Price Forecasting")
     st.markdown("""
-    **Probabilistic forecasting for cryptocurrencies and ETFs using deep learning.**
+    **Deterministic forecasting for cryptocurrencies and ETFs using deep learning.**
     
     Follow the guided workflow below to generate your forecast in 3 simple steps.
     """)
@@ -788,19 +774,24 @@ def main():
             if results.get("training_info"):
                 train_info = results["training_info"]
                 
+                train_nll = train_info.get('final_train_loss')
+                val_nll   = train_info.get('final_val_loss')
+                
                 st.metric(
-                    "Training Loss (NLL)",
-                    f"{train_info.get('final_train_nll', 0):.4f}",
-                    help="Negative log-likelihood. Lower is better.",
+                    "Training Loss (Huber)",
+                    f"{train_nll:.4f}" if train_nll is not None else "N/A",
+                    help="Huber regression loss. Lower is better.",
                 )
                 
                 st.metric(
-                    "Validation Loss (NLL)",
-                    f"{train_info.get('final_val_nll', 0):.4f}",
+                    "Validation Loss (Huber)",
+                    f"{val_nll:.4f}" if val_nll is not None else "N/A",
                     help="Model performance on held-out data.",
                 )
                 
-                st.caption(f"Run ID: `{train_info.get('run_id', 'unknown')}`")
+                t_time = train_info.get('training_time')
+                time_str = f" | {t_time:.1f}s" if t_time is not None else ""
+                st.caption(f"Run ID: `{train_info.get('run_id', 'unknown')}`{time_str}")
         
         # Advanced diagnostics (collapsible)
         with st.expander("🔬 Advanced Diagnostics", expanded=st.session_state.show_diagnostics):
@@ -826,31 +817,7 @@ def main():
                     if train_info.get("training_time"):
                         st.metric("Training Time", f"{train_info['training_time']:.1f}s")
             
-            st.markdown("**Forecast Distribution**")
-            
-            # Plot distribution of forecast samples if available
-            if results["forecast"].get("samples"):
-                samples = np.array(results["forecast"]["samples"])
-                
-                # Plot final step distribution
-                final_step_samples = samples[:, -1]
-                
-                fig = go.Figure()
-                fig.add_trace(go.Histogram(
-                    x=final_step_samples,
-                    nbinsx=50,
-                    name="Sample Distribution",
-                ))
-                
-                fig.update_layout(
-                    title=f"Distribution of Final Step Forecast",
-                    xaxis_title="Return",
-                    yaxis_title="Frequency",
-                    template="plotly_white",
-                    height=300,
-                )
-                
-                st.plotly_chart(fig, width="stretch")
+            st.markdown("**Forecast Details**")
             
             st.markdown("**Raw Forecast Data**")
             
@@ -878,8 +845,8 @@ def main():
     # Footer
     st.divider()
     st.caption("""
-    **DeepAR Forecasting** - Probabilistic time series forecasting using deep autoregressive models with Student's t likelihood.
-    The model learns to predict distributions (not just point estimates) to quantify forecast uncertainty.
+    **RNN Forecasting** - Deterministic time series forecasting using a recurrent neural network regressor with Huber loss.
+    Point forecasts with residual-based prediction intervals for uncertainty estimation.
     """)
 
 if __name__ == "__main__":

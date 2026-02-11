@@ -29,7 +29,7 @@ class IngestResponse(BaseModel):
 class TrainRequest(BaseModel):
     """Request schema for model training."""
 
-    model_name: str = Field("deepar", description="Model name")
+    model_name: str = Field("rnn", description="Model name")
     symbols: Optional[List[str]] = Field(None, description="Symbols to train on")
     symbol: Optional[str] = Field(None, description="Single symbol (alternative to symbols)")
     asset_type: Optional[str] = Field(None, description="Asset type: 'crypto' or 'etf'")
@@ -73,6 +73,19 @@ class TrainResponse(BaseModel):
     status: str
     run_id: str
     message: str
+    # Loss diagnostics — Huber regression loss from training history
+    final_train_loss: Optional[float] = None
+    final_val_loss: Optional[float] = None
+    residual_std: Optional[float] = None
+    # Training configuration echoed back for UI display
+    epochs: Optional[int] = None
+    batch_size: Optional[int] = None
+    learning_rate: Optional[float] = None
+    hidden_size: Optional[int] = None
+    num_layers: Optional[int] = None
+    dropout_rate: Optional[float] = None
+    context_length: Optional[int] = None
+    training_time: Optional[float] = None
 
 
 class ForecastRequest(BaseModel):
@@ -81,7 +94,6 @@ class ForecastRequest(BaseModel):
     symbol: str
     timeframe: str
     horizon: int
-    n_samples: int = Field(100, description="Number of sample paths")
     run_id: Optional[str] = Field(None, description="Specific run to use (optional)")
 
 
@@ -94,7 +106,7 @@ class ForecastResponse(BaseModel):
     timestamps: List[str]
     median: List[float]
     quantiles: Dict[str, List[float]]
-    samples: Optional[List[List[float]]] = None
+    residual_std: Optional[float] = None
 
 
 class BacktestRequest(BaseModel):

@@ -18,8 +18,8 @@ def compute_log_returns(df: pd.DataFrame, price_col: str = "close") -> pd.DataFr
     """
     Compute log-returns: r_t = log(P_t / P_{t-1}).
 
-    This is the PRIMARY forecast target for the DeepAR model.
-    [REF_DEEPAR_PAPER] Section 3.1 - we model r_t with Student's t distribution.
+    This is the PRIMARY forecast target for the RNN model.
+    Log-returns are approximately stationary for financial time series.
 
     Args:
         df: DataFrame with price column
@@ -311,9 +311,9 @@ def create_sequences(
     stride: int = 1,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    Create training sequences for DeepAR.
+    Create training sequences for the RNN regressor.
 
-    [REF_DEEPAR_PAPER] Section 3 - uses context window to predict horizon steps.
+    Uses a sliding context window to predict horizon steps ahead.
 
     Args:
         df: DataFrame with features

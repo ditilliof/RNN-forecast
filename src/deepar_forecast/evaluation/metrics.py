@@ -1,7 +1,8 @@
 """
-Evaluation metrics for probabilistic forecasting.
+Evaluation metrics for forecasting.
 
-[REF_DEEPAR_PAPER] Section 4 - Evaluation methodology
+Includes both deterministic (MAE, RMSE) and probabilistic (CRPS, coverage)
+metrics. Legacy NLL metric retained for backward compatibility.
 """
 
 from typing import Dict, List, Optional, Tuple

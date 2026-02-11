@@ -1,5 +1,5 @@
 """
-Shared plotting utilities for DeepAR forecast & backtest UIs.
+Shared plotting utilities for RNN forecast & backtest UIs.
 
 All Plotly figure creation lives here so both apps use identical
 y-axis scaling, colour palette, and layout logic.

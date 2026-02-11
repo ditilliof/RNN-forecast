@@ -1,4 +1,4 @@
-# Contributing to DeepAR Trade Forecast
+# Contributing to RNN Trade Forecast
 
 Thank you for your interest in contributing! This document provides guidelines for contributing to the project.
 
@@ -37,7 +37,7 @@ Thank you for your interest in contributing! This document provides guidelines f
 - Aim for >80% code coverage
 - Test critical paths:
   - Data leakage prevention
-  - Model likelihood computation
+  - Model regression loss computation
   - Backtest cost calculations
 
 ## Pull Request Process
@@ -73,8 +73,8 @@ Thank you for your interest in contributing! This document provides guidelines f
 
 If you're interested in research contributions:
 
-- Alternative likelihood functions (skew-t, GAS models)
-- Attention mechanisms for DeepAR
+- Alternative loss functions (quantile regression, Pinball loss)
+- Attention mechanisms for the RNN encoder
 - Multi-horizon forecasting improvements
 - Portfolio optimization integration
 - Risk-aware position sizing

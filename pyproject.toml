@@ -1,7 +1,7 @@
 [tool.poetry]
-name = "deepar-forecast"
-version = "0.1.0"
-description = "Production-grade crypto/ETF forecasting with DeepAR and Student's t likelihood"
+name = "rnn-forecast"
+version = "0.2.0"
+description = "Production-grade crypto/ETF forecasting with a deterministic RNN regressor and Huber loss"
 authors = ["Your Name <your.email@example.com>"]
 readme = "README.md"
 packages = [{include = "deepar_forecast", from = "src"}]

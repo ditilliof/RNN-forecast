@@ -1,5 +1,5 @@
 """
-Backtest Mode — Streamlit UI for walk-forward backtesting with DeepAR.
+Backtest Mode — Streamlit UI for walk-forward backtesting with RNN regressor.
 
 Run with:
     streamlit run src/deepar_forecast/app_ui/main_backtest.py
@@ -8,7 +8,7 @@ This app lets the user:
   1. Select an asset, timeframe, and forecast horizon.
   2. Choose a cutoff date (train on data ≤ cutoff, forecast afterwards).
   3. Train a model using only pre-cutoff data.
-  4. Compare forecast distribution to realised prices after the cutoff.
+  4. Compare forecast to realised prices after the cutoff.
   5. View MAE / RMSE / directional accuracy metrics.
 """
 
@@ -150,7 +150,6 @@ def run_backtest_pipeline(
                 "symbol": symbol,
                 "timeframe": timeframe,
                 "horizon": horizon,
-                "n_samples": 100,
                 "run_id": run_id,
             },
             timeout=120,
@@ -164,11 +163,10 @@ def run_backtest_pipeline(
         result["forecast"] = {
             "dates": [pd.Timestamp(t) for t in fc.get("timestamps", [])],
             "median": np.asarray(fc.get("median", []), dtype=np.float32),
-            "lower_80": np.asarray(quantiles.get("0.1", quantiles.get("0.25", [])), dtype=np.float32),
-            "upper_80": np.asarray(quantiles.get("0.9", quantiles.get("0.75", [])), dtype=np.float32),
-            "lower_95": np.asarray(quantiles.get("0.1", []), dtype=np.float32),
-            "upper_95": np.asarray(quantiles.get("0.9", []), dtype=np.float32),
-            "samples": fc.get("samples"),
+            "lower_80": np.asarray(quantiles.get("0.1", []), dtype=np.float32),
+            "upper_80": np.asarray(quantiles.get("0.9", []), dtype=np.float32),
+            "lower_95": np.asarray(quantiles.get("0.025", quantiles.get("0.05", [])), dtype=np.float32),
+            "upper_95": np.asarray(quantiles.get("0.975", quantiles.get("0.95", [])), dtype=np.float32),
         }
 
         # ── 4. Fetch full history + actual post-cutoff bars ────────────
@@ -274,7 +272,7 @@ def create_backtest_plot(
 # ============================================================================
 
 def main():
-    st.set_page_config(page_title="DeepAR Backtest", page_icon="🔬", layout="wide")
+    st.set_page_config(page_title="RNN Backtest", page_icon="🔬", layout="wide")
 
     # ── Dark-dashboard CSS (same as main app) ──────────────────────────
     st.markdown("""
@@ -293,7 +291,7 @@ def main():
     </style>
     """, unsafe_allow_html=True)
 
-    st.title("🔬 DeepAR Backtest Mode")
+    st.title("🔬 RNN Backtest Mode")
     st.markdown(
         "Train a model using **only data before a cutoff date**, then compare its "
         "forecast to the **actual realised prices** after the cutoff."
@@ -495,7 +493,7 @@ def main():
     # ── Footer ─────────────────────────────────────────────────────────
     st.divider()
     st.caption(
-        "**DeepAR Backtest** — Walk-forward evaluation. The model is trained on data "
+        "**RNN Backtest** — Walk-forward evaluation. The model is trained on data "
         "strictly before the cutoff and evaluated on unseen future bars."
     )
 

@@ -53,7 +53,7 @@ class BacktestResult:
 
 class BacktestEngine:
     """
-    Backtesting engine for trading strategies based on probabilistic forecasts.
+    Backtesting engine for trading strategies based on model forecasts.
 
     DISCLAIMER: For research and educational purposes only.
     Do not use for actual trading without thorough validation.

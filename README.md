@@ -1,6 +1,6 @@
-# DeepAR Trade Forecast
+# RNN Trade Forecast
 
-Production-grade forecasting system for cryptocurrencies and ETFs using DeepAR-style autoregressive RNN with Student's t likelihood for heavy-tailed financial returns.
+Production-grade forecasting system for cryptocurrencies and ETFs using a deterministic recurrent neural network regressor with Huber loss and residual-based prediction intervals.
 
 ## Architecture
 
@@ -8,8 +8,8 @@ Production-grade forecasting system for cryptocurrencies and ETFs using DeepAR-s
 src/deepar_forecast/
 ├── data/           # Data providers (CCXT, yfinance) + SQLite storage
 ├── features/       # Feature engineering (log-returns, indicators, no leakage)
-├── models/         # DeepAR with Student's t likelihood, training loop
-├── evaluation/     # Metrics (NLL, CRPS, coverage, calibration)
+├── models/         # RNN regressor with Huber loss, training loop
+├── evaluation/     # Metrics (MAE, RMSE, coverage, calibration)
 ├── backtest/       # Walk-forward backtesting with transaction costs
 ├── app_api/        # FastAPI REST endpoints (/ingest, /train, /forecast, /backtest)
 └── app_ui/         # Streamlit dashboards (main forecast + backtest mode)
