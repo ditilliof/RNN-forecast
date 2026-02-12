@@ -16,7 +16,7 @@ if __name__ == "__main__":
     app_path = os.path.join(
         os.path.dirname(__file__),
         'src',
-        'deepar_forecast',
+        'rnn_forecast',
         'app_ui',
         'app.py'
     )

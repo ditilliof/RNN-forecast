@@ -3,18 +3,18 @@ version: '3.8'
 services:
   api:
     build: .
-    container_name: deepar-api
+    container_name: rnn-api
     ports:
       - "8000:8000"
     volumes:
       - ./data:/app/data
       - ./models:/app/models
     environment:
-      - DATABASE_URL=sqlite:///data/deepar.db
+      - DATABASE_URL=sqlite:///data/rnn.db
       - DATA_DIR=/app/data
       - MODEL_DIR=/app/models
       - LOG_LEVEL=INFO
-    command: uvicorn deepar_forecast.app_api.main:app --host 0.0.0.0 --port 8000 --reload
+    command: uvicorn rnn_forecast.app_api.main:app --host 0.0.0.0 --port 8000 --reload
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -23,7 +23,7 @@ services:
 
   ui:
     build: .
-    container_name: deepar-ui
+    container_name: rnn-ui
     ports:
       - "8501:8501"
     volumes:
@@ -31,10 +31,10 @@ services:
       - ./models:/app/models
     environment:
       - API_URL=http://api:8000
-      - DATABASE_URL=sqlite:///data/deepar.db
+      - DATABASE_URL=sqlite:///data/rnn.db
       - DATA_DIR=/app/data
       - MODEL_DIR=/app/models
-    command: streamlit run src/deepar_forecast/app_ui/main.py --server.port 8501 --server.address 0.0.0.0
+    command: streamlit run src/rnn_forecast/app_ui/main.py --server.port 8501 --server.address 0.0.0.0
     depends_on:
       - api
 

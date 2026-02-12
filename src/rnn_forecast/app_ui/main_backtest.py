@@ -2,7 +2,7 @@
 Backtest Mode — Streamlit UI for walk-forward backtesting with RNN regressor.
 
 Run with:
-    streamlit run src/deepar_forecast/app_ui/main_backtest.py
+    streamlit run src/rnn_forecast/app_ui/main_backtest.py
 
 This app lets the user:
   1. Select an asset, timeframe, and forecast horizon.
@@ -25,7 +25,7 @@ from typing import Dict, List, Optional, Tuple
 from loguru import logger
 
 # ── Re-use helpers & constants from the main UI ────────────────────────────
-from deepar_forecast.app_ui.main import (
+from rnn_forecast.app_ui.main import (
     API_BASE_URL,
     CRYPTO_EXAMPLES,
     ETF_CATEGORIES,
@@ -35,7 +35,7 @@ from deepar_forecast.app_ui.main import (
     normalize_crypto_symbol,
     normalize_etf_symbol,
 )
-from deepar_forecast.app_ui.plot_helpers import (
+from rnn_forecast.app_ui.plot_helpers import (
     create_backtest_plot as _shared_backtest_plot,
 )
 

@@ -17,11 +17,11 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
-from deepar_forecast.backtest import BacktestConfig, BacktestEngine, prepare_forecast_signals
-from deepar_forecast.data import DataStorage, get_provider
-from deepar_forecast.evaluation import compute_all_metrics
-from deepar_forecast.features import create_sequences, engineer_features, split_by_time
-from deepar_forecast.models import RNNRegressor, RNNTrainer
+from rnn_forecast.backtest import BacktestConfig, BacktestEngine, prepare_forecast_signals
+from rnn_forecast.data import DataStorage, get_provider
+from rnn_forecast.evaluation import compute_all_metrics
+from rnn_forecast.features import create_sequences, engineer_features, split_by_time
+from rnn_forecast.models import RNNRegressor, RNNTrainer
 
 from .schemas import (
     BacktestRequest,
@@ -192,7 +192,7 @@ async def train_model(request: TrainRequest):
         # Per-symbol processing: engineer features & create sequences
         # independently to prevent cross-symbol data leakage.
         # -----------------------------------------------------------
-        from deepar_forecast.features import get_feature_columns
+        from rnn_forecast.features import get_feature_columns
 
         feature_config = request.feature_config or {}
         min_rows_needed = request.context_length + request.horizon

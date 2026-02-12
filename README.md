@@ -2,6 +2,22 @@
 
 Production-grade forecasting system for cryptocurrencies and ETFs using a deterministic recurrent neural network regressor with Huber loss and residual-based prediction intervals.
 
+## Algorithm Overview
+
+This system uses a **deterministic RNN regressor** that differs from probabilistic approaches like DeepAR:
+
+- **Architecture**: LSTM/GRU encoder with linear output head for point predictions
+- **Loss Function**: Huber loss (robust to outliers, combines L1 and L2)
+- **Training**: Teacher forcing on past + future context → deterministic regression
+- **Inference**: Autoregressive prediction feeding its own outputs forward
+- **Uncertainty Quantification**: Post-hoc prediction intervals from validation residual statistics (not learned distributions)
+
+Unlike probabilistic models (Student-t, Gaussian), this approach:
+- Produces single point forecasts per timestep
+- Uses robust regression loss instead of likelihood maximization
+- Derives confidence intervals from empirical residuals rather than parametric distributions
+- Provides computational efficiency and interpretability
+
 ## Architecture
 
 ```
@@ -15,8 +31,6 @@ src/rnn_forecast/
 └── app_ui/         # Streamlit dashboards (main forecast + backtest mode)
 ```
 
-> **Note:** The internal Python package name remains `deepar_forecast` (in imports and commands) to avoid refactoring the entire codebase. Only the project folder and GitHub repo are renamed to "RNN_forecast".
-
 ## Quick Start
 
 ### 1. Install
@@ -29,7 +43,7 @@ cp .env.example .env          # optional, defaults work out of the box
 ### 2. Start the API server
 
 ```bash
-poetry run uvicorn deepar_forecast.app_api.main:app --host 0.0.0.0 --port 8000
+poetry run uvicorn rnn_forecast.app_api.main:app --host 0.0.0.0 --port 8000
 ```
 
 API docs: <http://localhost:8000/docs>
@@ -37,7 +51,7 @@ API docs: <http://localhost:8000/docs>
 ### 3. Start the main Streamlit UI
 
 ```bash
-poetry run streamlit run src/deepar_forecast/app_ui/main.py --server.port 8501
+poetry run streamlit run src/rnn_forecast/app_ui/main.py --server.port 8501
 ```
 
 Open <http://localhost:8501> — follow the 3-step wizard (select asset → configure → run).
@@ -45,7 +59,7 @@ Open <http://localhost:8501> — follow the 3-step wizard (select asset → conf
 ### 4. Start the backtest UI (optional)
 
 ```bash
-poetry run streamlit run src/deepar_forecast/app_ui/main_backtest.py --server.port 8502
+poetry run streamlit run src/rnn_forecast/app_ui/main_backtest.py --server.port 8502
 ```
 
 Open <http://localhost:8502> — train with a cutoff date and compare forecast vs actual.

@@ -14,7 +14,7 @@ import hashlib
 import json
 from loguru import logger
 
-from deepar_forecast.app_ui.plot_helpers import (
+from rnn_forecast.app_ui.plot_helpers import (
     create_forecast_plot as _shared_forecast_plot,
 )
 

@@ -4,7 +4,7 @@ version = "0.2.0"
 description = "Production-grade crypto/ETF forecasting with a deterministic RNN regressor and Huber loss"
 authors = ["Your Name <your.email@example.com>"]
 readme = "README.md"
-packages = [{include = "deepar_forecast", from = "src"}]
+packages = [{include = "rnn_forecast", from = "src"}]
 
 [tool.poetry.dependencies]
 python = "^3.10"

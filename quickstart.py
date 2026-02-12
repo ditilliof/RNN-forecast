@@ -1,5 +1,5 @@
 """
-Quick start script for DeepAR Trade Forecast.
+"""Quick start script for RNN Trade Forecast.
 
 Demonstrates the complete workflow: ingest -> train -> forecast -> backtest
 """
@@ -12,11 +12,11 @@ import pandas as pd
 import torch
 from loguru import logger
 
-from deepar_forecast.backtest import BacktestConfig, BacktestEngine, prepare_forecast_signals
-from deepar_forecast.data import DataStorage, get_provider
-from deepar_forecast.evaluation import compute_all_metrics
-from deepar_forecast.features import create_sequences, engineer_features, split_by_time
-from deepar_forecast.models import DeepARStudentT, DeepARTrainer
+from rnn_forecast.backtest import BacktestConfig, BacktestEngine, prepare_forecast_signals
+from rnn_forecast.data import DataStorage, get_provider
+from rnn_forecast.evaluation import compute_all_metrics
+from rnn_forecast.features import create_sequences, engineer_features, split_by_time
+from rnn_forecast.models import RNNRegressor, RNNTrainer
 
 # Configuration
 SYMBOL = "BTC/USDT"
@@ -69,7 +69,7 @@ def main():
     logger.info("STEP 4: SEQUENCE CREATION")
     logger.info("=" * 80)
 
-    from deepar_forecast.features import get_feature_columns
+    from rnn_forecast.features import get_feature_columns
 
     feature_cols = get_feature_columns(df)
 
@@ -88,14 +88,14 @@ def main():
     logger.info("STEP 5: MODEL TRAINING")
     logger.info("=" * 80)
 
-    model = DeepARStudentT(
+    model = RNNRegressor(
         input_size=len(feature_cols),
         hidden_size=64,
         num_layers=2,
         rnn_type="lstm",
     )
 
-    trainer = DeepARTrainer(model, device=DEVICE)
+    trainer = RNNTrainer(model, device=DEVICE)
 
     train_data = {
         "past_target": train_past_target,
@@ -209,8 +209,8 @@ def main():
     logger.info(
         """
     Next steps:
-    1. Explore the Streamlit UI: streamlit run src/deepar_forecast/app_ui/main.py
-    2. Use the FastAPI: uvicorn deepar_forecast.app_api.main:app --reload
+    1. Explore the Streamlit UI: streamlit run src/rnn_forecast/app_ui/main.py
+    2. Use the FastAPI: uvicorn rnn_forecast.app_api.main:app --reload
     3. Check out docs/REFERENCES.md for more information
     4. Run tests: pytest tests/ -v
     """

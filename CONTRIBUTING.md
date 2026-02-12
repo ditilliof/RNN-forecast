@@ -7,7 +7,7 @@ Thank you for your interest in contributing! This document provides guidelines f
 1. **Clone the repository**
    ```bash
    git clone <repository-url>
-   cd DeepAR_trade_forecast
+   cd RNN_forecast
    ```
 
 2. **Install dependencies**
@@ -19,7 +19,7 @@ Thank you for your interest in contributing! This document provides guidelines f
 
 3. **Run tests**
    ```bash
-   pytest tests/ -v --cov=deepar_forecast
+   pytest tests/ -v --cov=rnn_forecast
    ```
 
 ## Code Style
