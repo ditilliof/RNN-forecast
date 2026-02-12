@@ -4,15 +4,15 @@ Production-grade forecasting system for cryptocurrencies and ETFs using a determ
 
 ## Algorithm Overview
 
-This system uses a **deterministic RNN regressor** that differs from probabilistic approaches like DeepAR:
+This system uses a **deterministic RNN regressor**:
 
 - **Architecture**: LSTM/GRU encoder with linear output head for point predictions
 - **Loss Function**: Huber loss (robust to outliers, combines L1 and L2)
 - **Training**: Teacher forcing on past + future context → deterministic regression
 - **Inference**: Autoregressive prediction feeding its own outputs forward
-- **Uncertainty Quantification**: Post-hoc prediction intervals from validation residual statistics (not learned distributions)
+- **Uncertainty Quantification**: Post-hoc prediction intervals from validation residual statistics
 
-Unlike probabilistic models (Student-t, Gaussian), this approach:
+This approach:
 - Produces single point forecasts per timestep
 - Uses robust regression loss instead of likelihood maximization
 - Derives confidence intervals from empirical residuals rather than parametric distributions
